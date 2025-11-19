@@ -1,5 +1,7 @@
 package ru.netology
 
+import kotlin.math.min
+
 const val MY_ID = 1
 
 class ChatNotFoundException(message: String) : Exception(message)
@@ -25,73 +27,49 @@ object ChatService {
     private var messageId = 0
 
     fun sendMessage(toId: Int, message: String): Int {
-        messages += Message(++messageId, toId, toId, MY_ID, message)
-        for ((index, chat) in chats.withIndex()) {
-            if (chat.chatId == toId) {
-                chats[index] = chat.copy(messageCount = chat.messageCount + 1)
-                return messages.last().messageId
-            }
+        messages.add(Message(++messageId, toId, toId, MY_ID, message))
+        val chatIndex = chats.indexOfFirst { it.chatId == toId }
+        chats.find { it.chatId == toId }?.let {
+            chats[chatIndex] = it.copy(messageCount = it.messageCount + 1)
+        } ?: run {
+            chats.add(Chat(toId, 1))
         }
-        chats += Chat(toId, 1)
         return messages.last().messageId
     }
 
     fun deleteMessage(messageId: Int): Boolean {
-        for ((indexMessage, message) in messages.withIndex()) {
-            if (message.messageId == messageId) {
-                messages.removeAt(indexMessage)
-                for ((indexChat, chat) in chats.withIndex()) {
-                    if (chat.chatId == message.chatId) {
-                        if (chat.messageCount - 1 == 0) {
-                            chats.removeAt(indexChat)
-                        } else {
-                            chats[indexChat] = chat.copy(messageCount = chat.messageCount - 1)
-                            readingChat(chat.chatId)
-                        }
+        val chatId = messages.find { it.messageId == messageId }?.chatId ?: return false
+        val chatIndex = chats.indexOfFirst { it.chatId == chatId }
+        messages.removeIf { it.messageId == messageId }
+            .also {
+                chats.find { it.chatId == chatId }
+                    .takeIf { it!!.messageCount - 1 != 0 }
+                    ?: run {
+                        chats.removeAt(chatIndex)
                         return true
                     }
-                }
             }
-        }
-        return false
+        val chat = chats[chatIndex]
+        chats[chatIndex] = chat.copy(messageCount = chat.messageCount - 1)
+        readingChat(chat.chatId)
+        return true
     }
 
-    fun deleteChat(chatId: Int): Boolean {
-        for ((indexChat, chat) in chats.withIndex()) {
-            if (chat.chatId == chatId) {
-                chats.removeAt(indexChat)
-                val iter = messages.iterator()
-                while (iter.hasNext()) {
-                    val message = iter.next()
-                    if (message.chatId == chatId) {
-                        iter.remove()
-                    }
-                }
-                return true
+    fun deleteChat(chatId: Int): Boolean =
+        chats.removeIf { it.chatId == chatId }
+            .also {
+                messages.removeAll { it.chatId == chatId }
             }
-        }
-        return false
-    }
 
     fun getUnreadChatsCount() = chats.count { !it.isRead }
 
     fun getChats() = chats.ifEmpty { throw ChatNotFoundException("Chat not found") }
 
-    fun getLastMessagesFromChats(): MutableList<String> {
-        if (messages.isEmpty()) return mutableListOf("Нет сообщений")
-        val ret = mutableListOf<String>()
-        for (chat in chats) {
-            val iter = messages.listIterator(messages.size)
-            while (iter.hasPrevious()) {
-                val message = iter.previous()
-                if (message.chatId == chat.chatId) {
-                    ret.add(message.message)
-                    break
-                }
-            }
-        }
-        return ret
-    }
+    fun getLastMessagesFromChats(): List<String> =
+        messages
+            .groupBy { it.chatId }
+            .map { it.value.lastOrNull()?.message ?: "Нет сообщений" }
+            .ifEmpty { listOf("Нет сообщений") }
 
     private fun readingChat(chatId: Int) {
         messages.find { it.chatId == chatId && !it.isRead }?.let { return }
@@ -110,29 +88,32 @@ object ChatService {
 
     fun getMessagesFromChat(chatId: Int, count: Int): MutableList<Message> {
         val ret = mutableListOf<Message>()
-        val iter = messages.listIterator(messages.size)
-        var size = 0
-        while (iter.hasPrevious() && count != size) {
-            val message = iter.previous()
-            if (message.chatId == chatId) {
-                ret.add(readingMessages(message))
-                size++
+        messages
+            .filter { it.chatId == chatId }
+            .reversed()
+            .subList(0, min(count, messages.count { it.chatId == chatId }))
+            .reversed()
+            .asSequence()
+            .let { list ->
+                list.find { !it.isRead }
+                    ?.let {
+                    list.forEach {
+                        ret.add(readingMessages(it))
+                    }
+                } ?: return list.toMutableList()
             }
-        }
         readingChat(chatId)
-        ret.reverse()
         return ret
     }
 
     fun sendMessageToMe(fromId: Int, message: String): Int {
-        messages += Message(++messageId, fromId, MY_ID, fromId, message, false)
-        for ((index, chat) in chats.withIndex()) {
-            if (chat.chatId == fromId) {
-                chats[index] = chat.copy(messageCount = chat.messageCount + 1, isRead = false)
-                return messages.last().messageId
-            }
+        messages.add(Message(++messageId, fromId, MY_ID, fromId, message, false))
+        val chatIndex = chats.indexOfFirst { it.chatId == fromId }
+        chats.find { it.chatId == fromId }?.let {
+            chats[chatIndex] = it.copy(messageCount = it.messageCount + 1, isRead = false)
+        } ?: run {
+            chats.add(Chat(fromId, 1, false))
         }
-        chats += Chat(fromId, 1, false)
         return messages.last().messageId
     }
 
